@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+
+<html lang="tr">
+<head>
+<meta charset="utf-8"/>
+<title>Sipariş ve Makbuz Sistemi</title>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js">
+// Enter tuşuyla ürün ekleme
+document.getElementById("urunFiyat").addEventListener("keypress", function(e) {
+  if (e.key === "Enter") urunEkle();
+});
+
+// Adet ve fiyat girildiğinde tahmini toplam göster
+["urunAdet", "urunFiyat"].forEach(id =>
+  document.getElementById(id).addEventListener("input", () => {
+    const adet = parseFloat(document.getElementById("urunAdet").value) || 0;
+    const fiyat = parseFloat(document.getElementById("urunFiyat").value) || 0;
+    document.getElementById("toplam").innerText = `TAHMİNİ TOPLAM: ${(adet * fiyat).toFixed(2)} TL`;
+  })
+);
+
+// Satış kaydından sonra form temizle
+const eskiSatisKaydet = satisiKaydet;
+satisiKaydet = function() {
+  eskiSatisKaydet();
+  document.getElementById("musteriAd").value = "";
+  document.getElementById("musteriTel").value = "";
+  document.getElementById("musteriAdres").value = "";
+  document.getElementById("faturaNotu").value = "";
+  urunler = [];
+  tabloGuncelle();
+};
+
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js">
+// Enter tuşuyla ürün ekleme
+document.getElementById("urunFiyat").addEventListener("keypress", function(e) {
+  if (e.key === "Enter") urunEkle();
+});
+
+// Adet ve fiyat girildiğinde tahmini toplam göster
+["urunAdet", "urunFiyat"].forEach(id =>
+  document.getElementById(id).addEventListener("input", () => {
+    const adet = parseFloat(document.getElementById("urunAdet").value) || 0;
+    const fiyat = parseFloat(document.getElementById("urunFiyat").value) || 0;
+    document.getElementById("toplam").innerText = `TAHMİNİ TOPLAM: ${(adet * fiyat).toFixed(2)} TL`;
+  })
+);
+
+// Satış kaydından sonra form temizle
+const eskiSatisKaydet = satisiKaydet;
+satisiKaydet = function() {
+  eskiSatisKaydet();
+  document.getElementById("musteriAd").value = "";
+  document.getElementById("musteriTel").value = "";
+  document.getElementById("musteriAdres").value = "";
+  document.getElementById("faturaNotu").value = "";
+  urunler = [];
+  tabloGuncelle();
+};
+
+</script>
+<style>
+    body {
+      font-family: Arial;
+      background: #f4f4f4;
+      padding: 20px;
+      max-width: 1000px;
+      margin: auto;
+      text-transform: uppercase;
+    }
+    h3 {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    input, textarea, select {
+      width: 100%;
+      padding: 14px;
+      margin: 5px 0;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      font-size: 18px;
+    }
+    label {
+      margin-top: 10px;
+      display: block;
+      font-size: 14px;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .col {
+      flex: 1;
+      min-width: 200px;
+    }
+    .buttons,
+    .altButonlar {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .buttons button,
+    .altButonlar button {
+      padding: 14px;
+      font-size: 16px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .blue { background: #007bff; color: #fff; }
+    .green { background: #28a745; color: #fff; }
+    .orange { background: #fd7e14; color: #fff; }
+    .gray { background: #6c757d; color: #fff; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+      background: #fff;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 8px;
+      text-align: left;
+    }
+    th {
+      background: #f0f0f0;
+    }
+    .actions button {
+      margin-right: 5px;
+      padding: 4px 8px;
+      font-size: 14px;
+    }
+    #ayarlarPaneli {
+      display: none;
+      padding: 10px;
+      background: #fff;
+      border: 1px solid #ccc;
+      margin-top: 20px;
+      border-radius: 6px;
+    }
+  </style>
+<link href="https://fonts.googleapis.com/css2?family=Roboto&amp;display=swap" rel="stylesheet"/>
+<style>
+  body { font-family: 'Roboto', sans-serif; }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script></head>
+<body>
+<h3 id="baslik">SATIŞ MAKBUZU</h3><div id="makbuzNo" style="text-align:center; margin-bottom:10px; font-weight:bold;">Makbuz No: </div>
+<div class="row">
+<div class="col"><label>Müşteri Adı</label><input autocomplete="off" id="musteriAd" type="text"/></div>
+<div class="col"><label>Telefon</label><input autocomplete="off" id="musteriTel" type="text"/></div>
+<div class="col"><label>Adres</label><input autocomplete="off" id="musteriAdres" type="text"/></div>
+</div>
+<label>Fatura Notu</label><textarea id="faturaNotu" rows="2"></textarea>
+<hr/>
+<h4>ÜRÜN EKLE</h4>
+<input autocomplete="off" id="urunAd" placeholder="Ürün Adı"/>
+<div class="row">
+<div class="col"><input id="urunAdet" onfocus="this.select()" placeholder="Adet" type="number" value="1"/></div>
+<div class="col"><input id="urunFiyat" onfocus="this.select()" placeholder="Fiyat" type="number" value="0"/></div>
+</div>
+<button class="gray" onclick="urunEkle()" style="width: 100%; margin-top: 5px">ÜRÜN EKLE</button>
+<table id="urunlerTablosu">
+<thead>
+<tr><th>ÜRÜN</th><th>Adet</th><th>Fiyat</th><th>Toplam</th><th>İşlem</th></tr>
+</thead>
+<tbody></tbody>
+</table>
+<div id="toplam">TOPLAM: 0 TL</div>
+<div class="buttons">
+<button class="green" onclick="satisiKaydet()">Satışı Kaydet</button>
+<button class="blue" onclick="excelIndir()">Excel İndir</button>
+<button class="gray" onclick="jsonIndir()">JSON İndir</button>
+<button class="gray" onclick="yedekle()">Yedekle</button>
+<button class="orange" onclick="yedektenYukle()">Yedekten Yükle</button>
+<button class="orange" onclick="veriTemizle()">Verileri Temizle</button>
+</div>
+<div class="altButonlar"><button class="gray" onclick="document.getElementById('satisListesiPaneli').style.display = (document.getElementById('satisListesiPaneli').style.display === 'none' ? 'block' : 'none');">Satış Listesi</button>
+<button class="orange" onclick="pdfOlustur()">PDF Yazdır</button>
+<button class="gray" onclick="yazdir()">Tablo Yazdır</button>
+<button class="blue" onclick="whatsapp()">WhatsApp</button>
+<button class="gray" onclick="toggleAyarlar()">Ayarlar</button>
+<button class="orange" onclick="tumunuSil()">Tümünü Sil</button>
+<button class="green" onclick="ayarKaydet()">Ayarları Kaydet</button>
+<button class="gray" onclick="makbuzuPNGKaydet()">PNG Olarak Kaydet</button></div>
+<div id="ayarlarPaneli">
+<h4>Ayarlar</h4>
+<label>Makbuz Başlığı</label><input autocomplete="off" id="ay_baslik" type="text"/>
+<label>Teşekkür Mesajı</label><input autocomplete="off" id="ay_tesekkur" type="text"/>
+<label>IBAN</label><input autocomplete="off" id="ay_iban" type="text"/>
+</div>
+<script>
+    // Başlangıç değişkenler ve fonksiyonlar
+    let urunler = [];
+    let duzenleIndex = -1;
+
+    // Ürün ekleme ve düzenleme fonksiyonu
+    function urunEkle() {
+      const ad = document.getElementById("urunAd").value.trim();
+      const adet = parseFloat(document.getElementById("urunAdet").value);
+      const fiyat = parseFloat(document.getElementById("urunFiyat").value);
+      if (!ad || adet <= 0 || fiyat < 0) return alert("Eksik veya geçersiz bilgi!");
+
+      if (duzenleIndex > -1) {
+        urunler[duzenleIndex] = { ad, adet, fiyat };
+        duzenleIndex = -1;
+      } else {
+        urunler.push({ ad, adet, fiyat });
+      }
+
+      document.getElementById("urunAd").value = "";
+      document.getElementById("urunAdet").value = 1;
+      document.getElementById("urunFiyat").value = 0;
+      tabloGuncelle();
+    }
+
+    // Ürünler tablosunu güncelleme
+    function tabloGuncelle() {
+      const tbody = document.querySelector("#urunlerTablosu tbody");
+      tbody.innerHTML = "";
+      let toplam = 0;
+
+      urunler.forEach((u, i) => {
+        const tr = document.createElement("tr");
+        const toplamSatir = (u.adet * u.fiyat).toFixed(2);
+        tr.innerHTML = `
+          <td>${u.ad}</td>
+          <td>${u.adet}</td>
+          <td>${u.fiyat.toFixed(2)}</td>
+          <td>${toplamSatir}</td>
+          <td class="actions">
+            <button onclick="duzenle(${i})">Düzenle</button>
+            <button onclick="sil(${i})">Sil</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+        toplam += u.adet * u.fiyat;
+      });
+
+      document.getElementById("toplam").innerText = `TOPLAM: ${toplam.toFixed(2)} TL`;
+    }
+
+    // Ürün düzenleme
+    function duzenle(i) {
+      const u = urunler[i];
+      document.getElementById("urunAd").value = u.ad;
+      document.getElementById("urunAdet").value = u.adet;
+      document.getElementById("urunFiyat").value = u.fiyat;
+      duzenleIndex = i;
+    }
+
+    // Ürün silme
+    function sil(i) {
+      if (confirm("Silmek istediğine emin misin?")) {
+        urunler.splice(i, 1);
+        tabloGuncelle();
+      }
+    }
+
+    // Tüm ürünleri sil
+    function tumunuSil() {
+      if (confirm("Tüm ürünler silinecek. Emin misiniz?")) {
+        urunler = [];
+        tabloGuncelle();
+      }
+    }
+}
+
+    // PDF oluşturma (sadece makbuz kısmı)
+    function pdfOlustur() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      let y = 10;
+      doc.setFontSize(14);
+      doc.text(document.getElementById("baslik").innerText, 10, y);
+      y += 10;
+
+      const musteri = [
+        "Müşteri: " + document.getElementById("musteriAd").value,
+        "Telefon: " + document.getElementById("musteriTel").value,
+        "Adres: " + document.getElementById("musteriAdres").value,
+        "Not: " + document.getElementById("faturaNotu").value,
+      ];
+      musteri.forEach((line) => {
+        doc.text(line, 10, y);
+        y += 10;
+      });
+
+      doc.text("Ürünler:", 10, y);
+      y += 10;
+      urunler.forEach((u) => {
+        doc.text(`${u.ad} - ${u.adet} x ${u.fiyat} = ${(u.adet * u.fiyat).toFixed(2)} TL`, 10, y);
+        y += 10;
+      });
+
+      const toplam = urunler.reduce((t, u) => t + u.adet * u.fiyat, 0);
+      doc.text("TOPLAM: " + toplam.toFixed(2) + " TL", 10, y + 5);
+      y += 15;
+
+      doc.text("Teşekkürler: " + (localStorage.getItem("tesekkur") || ""), 10, y);
+      y += 10;
+      doc.text("IBAN: " + (localStorage.getItem("iban") || ""), 10, y);
+      doc.save("makbuz.pdf");
+    }
+
+    function yazdir() {
+      const printWindow = window.open("", "_blank");
+      const head = document.head.innerHTML;
+      const musteri = `
+        <p>${document.getElementById("musteriAd").value}</p>
+        <p>${document.getElementById("musteriTel").value}</p>
+        <p>${document.getElementById("musteriAdres").value}</p>
+        <p>${document.getElementById("faturaNotu").value}</p>
+      `;
+      const urunlerHtml = document.getElementById("urunlerTablosu").outerHTML;
+      const toplam = document.getElementById("toplam").outerHTML;
+      printWindow.document.write(`<html><head>${head}
+<link href="https://fonts.googleapis.com/css2?family=Roboto&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Roboto', sans-serif; }
+</style>
+
+</head><body><h3>${document.getElementById("baslik").innerText}</h3>${musteri}${urunlerHtml}${toplam}</body></html>`);
+      printWindow.document.close();
+      printWindow.print();
+    }
+
+    function whatsapp() {
+      let mesaj = `${document.getElementById("baslik").innerText}\n`;
+      mesaj += `Müşteri: ${document.getElementById("musteriAd").value}\n`;
+      mesaj += `Telefon: ${document.getElementById("musteriTel").value}\n`;
+      mesaj += `Adres: ${document.getElementById("musteriAdres").value}\n`;
+      urunler.forEach((u) => {
+        mesaj += `${u.ad} - ${u.adet} x ${u.fiyat} = ${(u.adet * u.fiyat).toFixed(2)} TL\n`;
+      });
+      const toplam = urunler.reduce((t, u) => t + u.adet * u.fiyat, 0);
+      mesaj += `TOPLAM: ${toplam.toFixed(2)} TL\n`;
+      mesaj += `Teşekkürler: ${localStorage.getItem("tesekkur") || ""}\n`;
+      mesaj += `IBAN: ${localStorage.getItem("iban") || ""}`;
+      const url = `https://wa.me/?text=${encodeURIComponent(mesaj)}`;
+      window.open(url, "_blank");
+    }
+
+    function satisiKaydet() {
+      const musteri = {
+        ad: document.getElementById("musteriAd").value,
+        tel: document.getElementById("musteriTel").value,
+        adres: document.getElementById("musteriAdres").value,
+        not: document.getElementById("faturaNotu").value,
+        urunler,
+        tarih: new Date().toLocaleString(),
+      };
+      let kayitlar = JSON.parse(localStorage.getItem("kayitlar") || "[]");
+      kayitlar.push(musteri);
+      localStorage.setItem("kayitlar", JSON.stringify(kayitlar));
+      alert("Satış kaydedildi.");
+    }
+
+    function excelIndir() {
+      const ws = XLSX.utils.json_to_sheet(urunler.map(u => ({
+        Ürün: u.ad,
+        Adet: u.adet,
+        Fiyat: u.fiyat,
+        Toplam: (u.adet * u.fiyat).toFixed(2)
+      })));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Makbuz");
+      XLSX.writeFile(wb, "makbuz.xlsx");
+    }
+
+    function jsonIndir() {
+      const blob = new Blob([JSON.stringify(urunler, null, 2)], { type: "application/json" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "makbuz.json";
+      link.click();
+    }
+
+    function yedekle() {
+      const yedek = {
+        musteriAd: document.getElementById("musteriAd").value,
+        musteriTel: document.getElementById("musteriTel").value,
+        musteriAdres: document.getElementById("musteriAdres").value,
+        faturaNotu: document.getElementById("faturaNotu").value,
+        urunler
+      };
+      localStorage.setItem("yedek", JSON.stringify(yedek));
+      alert("Yedeklendi");
+    }
+
+    function yedektenYukle() {
+      const y = JSON.parse(localStorage.getItem("yedek") || "{}");
+      document.getElementById("musteriAd").value = y.musteriAd || "";
+      document.getElementById("musteriTel").value = y.musteriTel || "";
+      document.getElementById("musteriAdres").value = y.musteriAdres || "";
+      document.getElementById("faturaNotu").value = y.faturaNotu || "";
+      urunler = y.urunler || [];
+      tabloGuncelle();
+    }
+
+    function veriTemizle() {
+      if (confirm("Tüm kayıtlar silinecek. Emin misiniz?")) {
+        localStorage.removeItem("kayitlar");
+        localStorage.removeItem("yedek");
+        alert("Tüm veriler silindi.");
+      }
+    }
+
+    function toggleAyarlar() {
+      const panel = document.getElementById("ayarlarPaneli");
+      panel.style.display = panel.style.display === "none" ? "block" : "none";
+      document.getElementById("ay_baslik").value = document.getElementById("baslik").innerText;
+      document.getElementById("ay_tesekkur").value = localStorage.getItem("tesekkur") || "";
+      document.getElementById("ay_iban").value = localStorage.getItem("iban") || "";
+    }
+
+    function ayarKaydet() {
+      localStorage.setItem("tesekkur", document.getElementById("ay_tesekkur").value);
+      localStorage.setItem("iban", document.getElementById("ay_iban").value);
+      document.getElementById("baslik").innerText = document.getElementById("ay_baslik").value;
+      alert("Ayarlar kaydedildi.");
+    }
+
+    // Başlık ve teşekkür-iban bilgilerini yükle
+    window.onload = () => {
+      const kayitli = localStorage.getItem("kayitlar");
+      if (kayitli) console.log("Kayıtlı satışlar yüklendi.");
+      const baslik = localStorage.getItem("baslik");
+      const tesekkur = localStorage.getItem("tesekkur");
+      const iban = localStorage.getItem("iban");
+      if (baslik) document.getElementById("baslik").innerText = baslik;
+    };
+  
+// Enter tuşuyla ürün ekleme
+document.getElementById("urunFiyat").addEventListener("keypress", function(e) {
+  if (e.key === "Enter") urunEkle();
+});
+
+// Adet ve fiyat girildiğinde tahmini toplam göster
+["urunAdet", "urunFiyat"].forEach(id =>
+  document.getElementById(id).addEventListener("input", () => {
+    const adet = parseFloat(document.getElementById("urunAdet").value) || 0;
+    const fiyat = parseFloat(document.getElementById("urunFiyat").value) || 0;
+    document.getElementById("toplam").innerText = `TAHMİNİ TOPLAM: ${(adet * fiyat).toFixed(2)} TL`;
+  })
+);
+
+// Satış kaydından sonra form temizle
+const eskiSatisKaydet = satisiKaydet;
+satisiKaydet = function() {
+  eskiSatisKaydet();
+  document.getElementById("musteriAd").value = "";
+  document.getElementById("musteriTel").value = "";
+  document.getElementById("musteriAdres").value = "";
+  document.getElementById("faturaNotu").value = "";
+  urunler = [];
+  tabloGuncelle();
+};
+
+
+
+// Makbuz Numarası
+function guncelleMakbuzNo() {
+  let no = parseInt(localStorage.getItem("makbuzNo") || "20250000") + 1;
+  localStorage.setItem("makbuzNo", no);
+  document.getElementById("makbuzNo").innerText = "Makbuz No: " + no;
+  return no;
+}
+
+// Satış Listesi
+function satisListesiniGuncelle() {
+  const tablo = document.getElementById("satisListesiTablosu").querySelector("tbody");
+  tablo.innerHTML = "";
+  const kayitlar = JSON.parse(localStorage.getItem("kayitlar") || "[]");
+  kayitlar.forEach(k => {
+    const toplam = k.urunler.reduce((t, u) => t + u.adet * u.fiyat, 0).toFixed(2);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${k.tarih}</td><td>${k.ad}</td><td>${toplam} TL</td>`;
+    tablo.appendChild(tr);
+  });
+}
+
+// PNG Kaydet
+function makbuzuPNGKaydet() {
+  html2canvas(document.body).then(canvas => {
+    const link = document.createElement("a");
+    link.download = "makbuz.png";
+    link.href = canvas.toDataURL();
+    link.click();
+  });
+}
+
+// Satış kaydında makbuz no ekleyelim
+const eskiSatisKaydet2 = satisiKaydet;
+satisiKaydet = function() {
+  const no = guncelleMakbuzNo();
+  eskiSatisKaydet2();
+  console.log("Makbuz No: " + no);
+  document.getElementById("musteriAd").value = "";
+  document.getElementById("musteriTel").value = "";
+  document.getElementById("musteriAdres").value = "";
+  document.getElementById("faturaNotu").value = "";
+  urunler = [];
+  tabloGuncelle();
+};
+</script>
+
+<div id="satisListesiPaneli" style="display:none; margin-top:20px; background:#fff; padding:10px; border-radius:6px; border:1px solid #ccc;">
+<h4>Geçmiş Satışlar</h4>
+<button class="gray" onclick="satisListesiniGuncelle()" style="margin-bottom:10px;">Listeyi Güncelle</button>
+<table id="satisListesiTablosu"><thead><tr><th>Tarih</th><th>Müşteri</th><th>Toplam</th></tr></thead><tbody></tbody></table>
+</div>
+</body>
+</html>
