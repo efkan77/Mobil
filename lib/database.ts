@@ -72,6 +72,57 @@ export function initializeDatabase() {
     )
   `)
 
+  // Kar hedefleri tablosu
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS profit_targets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_type TEXT NOT NULL, -- monthly, quarterly, yearly
+      target_period TEXT NOT NULL, -- 2024-01, 2024-Q1, 2024
+      revenue_target REAL NOT NULL,
+      profit_target REAL NOT NULL,
+      margin_target REAL NOT NULL,
+      sales_target INTEGER DEFAULT 0,
+      category_id INTEGER, -- NULL for overall targets
+      product_id INTEGER, -- NULL for overall targets
+      status TEXT DEFAULT 'active', -- active, completed, cancelled
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (category_id) REFERENCES categories (id),
+      FOREIGN KEY (product_id) REFERENCES products (id)
+    )
+  `)
+
+  // Hedef takip tablosu
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS target_tracking (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_id INTEGER NOT NULL,
+      tracking_date DATE NOT NULL,
+      actual_revenue REAL DEFAULT 0,
+      actual_profit REAL DEFAULT 0,
+      actual_margin REAL DEFAULT 0,
+      actual_sales INTEGER DEFAULT 0,
+      achievement_percentage REAL DEFAULT 0,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (target_id) REFERENCES profit_targets (id)
+    )
+  `)
+
+  // Hedef bildirimleri tablosu
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS target_notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_id INTEGER NOT NULL,
+      notification_type TEXT NOT NULL, -- warning, success, danger
+      message TEXT NOT NULL,
+      is_read BOOLEAN DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (target_id) REFERENCES profit_targets (id)
+    )
+  `)
+
   // Gider kategorileri tablosu
   db.exec(`
     CREATE TABLE IF NOT EXISTS expense_categories (
@@ -253,6 +304,26 @@ export function initializeDatabase() {
     expenseCategories.forEach((cat) => stmt.run(cat.name, cat.description, cat.is_fixed))
   }
 
+  // Varsayılan kar hedeflerini ekle
+  const targetCount = db.prepare("SELECT COUNT(*) as count FROM profit_targets").get() as any
+  if (targetCount.count === 0) {
+    const currentYear = new Date().getFullYear()
+    const currentMonth = new Date().getMonth() + 1
+
+    // Yıllık hedef
+    db.prepare(`
+      INSERT INTO profit_targets (target_type, target_period, revenue_target, profit_target, margin_target, sales_target, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run("yearly", currentYear.toString(), 30000000, 6000000, 20, 2000, "Yıllık genel hedef")
+
+    // Aylık hedef
+    const monthPeriod = `${currentYear}-${currentMonth.toString().padStart(2, "0")}`
+    db.prepare(`
+      INSERT INTO profit_targets (target_type, target_period, revenue_target, profit_target, margin_target, sales_target, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run("monthly", monthPeriod, 2500000, 500000, 20, 170, "Aylık genel hedef")
+  }
+
   // Varsayılan fatura şablonu ekle
   const templateCount = db.prepare("SELECT COUNT(*) as count FROM invoice_templates").get() as any
   if (templateCount.count === 0) {
@@ -279,7 +350,230 @@ export function initializeDatabase() {
   console.log("✅ Veritabanı başarıyla oluşturuldu: efegida.db")
 }
 
-// Gider işlemleri
+// Kar hedefleri işlemleri
+export const targetQueries = {
+  // Tüm hedefleri getir
+  getAll: () => {
+    return db
+      .prepare(`
+      SELECT pt.*, c.name as category_name, p.name as product_name
+      FROM profit_targets pt
+      LEFT JOIN categories c ON pt.category_id = c.id
+      LEFT JOIN products p ON pt.product_id = p.id
+      ORDER BY pt.created_at DESC
+    `)
+      .all()
+  },
+
+  // Aktif hedefleri getir
+  getActive: () => {
+    return db
+      .prepare(`
+      SELECT pt.*, c.name as category_name, p.name as product_name
+      FROM profit_targets pt
+      LEFT JOIN categories c ON pt.category_id = c.id
+      LEFT JOIN products p ON pt.product_id = p.id
+      WHERE pt.status = 'active'
+      ORDER BY pt.target_period DESC
+    `)
+      .all()
+  },
+
+  // Belirli dönem hedefini getir
+  getByPeriod: (targetType: string, period: string) => {
+    return db
+      .prepare(`
+      SELECT pt.*, c.name as category_name, p.name as product_name
+      FROM profit_targets pt
+      LEFT JOIN categories c ON pt.category_id = c.id
+      LEFT JOIN products p ON pt.product_id = p.id
+      WHERE pt.target_type = ? AND pt.target_period = ?
+    `)
+      .all(targetType, period)
+  },
+
+  // Hedef oluştur
+  create: (target: any) => {
+    const stmt = db.prepare(`
+      INSERT INTO profit_targets 
+      (target_type, target_period, revenue_target, profit_target, margin_target, sales_target, category_id, product_id, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    return stmt.run(
+      target.target_type,
+      target.target_period,
+      target.revenue_target,
+      target.profit_target,
+      target.margin_target,
+      target.sales_target,
+      target.category_id,
+      target.product_id,
+      target.notes,
+    )
+  },
+
+  // Hedef güncelle
+  update: (id: number, target: any) => {
+    const stmt = db.prepare(`
+      UPDATE profit_targets 
+      SET revenue_target = ?, profit_target = ?, margin_target = ?, sales_target = ?, notes = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `)
+    return stmt.run(
+      target.revenue_target,
+      target.profit_target,
+      target.margin_target,
+      target.sales_target,
+      target.notes,
+      id,
+    )
+  },
+
+  // Hedef durumunu güncelle
+  updateStatus: (id: number, status: string) => {
+    const stmt = db.prepare("UPDATE profit_targets SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    return stmt.run(status, id)
+  },
+
+  // Hedef gerçekleşme oranını hesapla
+  getTargetAchievement: (targetId: number, startDate: string, endDate: string) => {
+    const target = db.prepare("SELECT * FROM profit_targets WHERE id = ?").get(targetId) as any
+
+    if (!target) return null
+
+    let actualData
+    if (target.category_id) {
+      // Kategori bazında
+      actualData = db
+        .prepare(`
+        SELECT 
+          SUM(si.total_price) as actual_revenue,
+          SUM(si.gross_profit) as actual_profit,
+          AVG(si.profit_margin) as actual_margin,
+          SUM(si.quantity) as actual_sales
+        FROM sale_items si
+        JOIN products p ON si.product_id = p.id
+        JOIN sales s ON si.sale_id = s.id
+        WHERE p.category_id = ? AND DATE(s.created_at) BETWEEN ? AND ?
+      `)
+        .get(target.category_id, startDate, endDate)
+    } else if (target.product_id) {
+      // Ürün bazında
+      actualData = db
+        .prepare(`
+        SELECT 
+          SUM(si.total_price) as actual_revenue,
+          SUM(si.gross_profit) as actual_profit,
+          AVG(si.profit_margin) as actual_margin,
+          SUM(si.quantity) as actual_sales
+        FROM sale_items si
+        JOIN sales s ON si.sale_id = s.id
+        WHERE si.product_id = ? AND DATE(s.created_at) BETWEEN ? AND ?
+      `)
+        .get(target.product_id, startDate, endDate)
+    } else {
+      // Genel hedef
+      actualData = db
+        .prepare(`
+        SELECT 
+          SUM(total_amount) as actual_revenue,
+          SUM(gross_profit) as actual_profit,
+          AVG(profit_margin) as actual_margin,
+          COUNT(*) as actual_sales
+        FROM sales 
+        WHERE DATE(created_at) BETWEEN ? AND ?
+      `)
+        .get(startDate, endDate)
+    }
+
+    return {
+      target,
+      actual: actualData,
+      achievement: {
+        revenue: actualData?.actual_revenue ? (actualData.actual_revenue / target.revenue_target) * 100 : 0,
+        profit: actualData?.actual_profit ? (actualData.actual_profit / target.profit_target) * 100 : 0,
+        margin: actualData?.actual_margin ? (actualData.actual_margin / target.margin_target) * 100 : 0,
+        sales: actualData?.actual_sales ? (actualData.actual_sales / target.sales_target) * 100 : 0,
+      },
+    }
+  },
+
+  // Hedef takip kaydı oluştur
+  createTracking: (targetId: number, trackingData: any) => {
+    const stmt = db.prepare(`
+      INSERT INTO target_tracking 
+      (target_id, tracking_date, actual_revenue, actual_profit, actual_margin, actual_sales, achievement_percentage, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    return stmt.run(
+      targetId,
+      trackingData.tracking_date,
+      trackingData.actual_revenue,
+      trackingData.actual_profit,
+      trackingData.actual_margin,
+      trackingData.actual_sales,
+      trackingData.achievement_percentage,
+      trackingData.notes,
+    )
+  },
+
+  // Hedef takip geçmişi
+  getTrackingHistory: (targetId: number) => {
+    return db
+      .prepare(`
+      SELECT * FROM target_tracking 
+      WHERE target_id = ? 
+      ORDER BY tracking_date DESC
+    `)
+      .all(targetId)
+  },
+}
+
+// Hedef bildirimleri işlemleri
+export const notificationQueries = {
+  getAll: () => {
+    return db
+      .prepare(`
+      SELECT tn.*, pt.target_type, pt.target_period
+      FROM target_notifications tn
+      JOIN profit_targets pt ON tn.target_id = pt.id
+      ORDER BY tn.created_at DESC
+    `)
+      .all()
+  },
+
+  getUnread: () => {
+    return db
+      .prepare(`
+      SELECT tn.*, pt.target_type, pt.target_period
+      FROM target_notifications tn
+      JOIN profit_targets pt ON tn.target_id = pt.id
+      WHERE tn.is_read = 0
+      ORDER BY tn.created_at DESC
+    `)
+      .all()
+  },
+
+  create: (targetId: number, type: string, message: string) => {
+    const stmt = db.prepare(`
+      INSERT INTO target_notifications (target_id, notification_type, message)
+      VALUES (?, ?, ?)
+    `)
+    return stmt.run(targetId, type, message)
+  },
+
+  markAsRead: (id: number) => {
+    const stmt = db.prepare("UPDATE target_notifications SET is_read = 1 WHERE id = ?")
+    return stmt.run(id)
+  },
+
+  markAllAsRead: () => {
+    const stmt = db.prepare("UPDATE target_notifications SET is_read = 1")
+    return stmt.run()
+  },
+}
+
+// Diğer mevcut query'ler...
 export const expenseQueries = {
   getAll: () => {
     return db
@@ -339,7 +633,6 @@ export const expenseQueries = {
   },
 }
 
-// Gider kategorileri işlemleri
 export const expenseCategoryQueries = {
   getAll: () => db.prepare("SELECT * FROM expense_categories ORDER BY name").all(),
   create: (name: string, description: string, isFixed: boolean) => {
@@ -348,9 +641,7 @@ export const expenseCategoryQueries = {
   },
 }
 
-// Kar-zarar analiz işlemleri
 export const profitLossQueries = {
-  // Günlük kar-zarar
   getDailyProfitLoss: (startDate: string, endDate: string) => {
     return db
       .prepare(`
@@ -369,7 +660,6 @@ export const profitLossQueries = {
       .all(startDate, endDate)
   },
 
-  // Aylık kar-zarar
   getMonthlyProfitLoss: (year: number) => {
     return db
       .prepare(`
@@ -388,7 +678,6 @@ export const profitLossQueries = {
       .all(year.toString())
   },
 
-  // Ürün bazında kar analizi
   getProductProfitAnalysis: (startDate: string, endDate: string) => {
     return db
       .prepare(`
@@ -413,7 +702,6 @@ export const profitLossQueries = {
       .all(startDate, endDate)
   },
 
-  // Kategori bazında kar analizi
   getCategoryProfitAnalysis: (startDate: string, endDate: string) => {
     return db
       .prepare(`
@@ -436,7 +724,6 @@ export const profitLossQueries = {
       .all(startDate, endDate)
   },
 
-  // Müşteri bazında kar analizi
   getCustomerProfitAnalysis: (startDate: string, endDate: string) => {
     return db
       .prepare(`
@@ -458,7 +745,6 @@ export const profitLossQueries = {
       .all(startDate, endDate)
   },
 
-  // Genel finansal özet
   getFinancialSummary: (startDate: string, endDate: string) => {
     const salesSummary = db
       .prepare(`
@@ -489,7 +775,6 @@ export const profitLossQueries = {
     return { sales: salesSummary, expenses: expenseSummary }
   },
 
-  // Trend analizi
   getTrendAnalysis: (days = 30) => {
     const endDate = new Date().toISOString().split("T")[0]
     const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
@@ -510,14 +795,12 @@ export const profitLossQueries = {
   },
 }
 
-// Satış işlemleri (kar-zarar hesaplı)
 export const salesQueries = {
   create: (sale: any, items: any[]) => {
     const transaction = db.transaction(() => {
       let totalCost = 0
       let totalProfit = 0
 
-      // Satışı ekle
       const saleResult = db
         .prepare(`
         INSERT INTO sales (customer_id, total_amount, total_cost, gross_profit, profit_margin, payment_type, notes)
@@ -535,7 +818,6 @@ export const salesQueries = {
 
       const saleId = saleResult.lastInsertRowid
 
-      // Satış detaylarını ekle
       const itemStmt = db.prepare(`
         INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, unit_cost, total_price, total_cost, gross_profit, profit_margin)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -568,12 +850,10 @@ export const salesQueries = {
 
         stockStmt.run(item.quantity, item.product_id)
 
-        // Ürün kar marjını güncelle
         const productMargin = item.unit_price > 0 ? ((item.unit_price - item.unit_cost) / item.unit_price) * 100 : 0
         statsStmt.run(item.quantity, item.total_price, itemProfit, productMargin, item.product_id)
       })
 
-      // Satış kar-zarar güncelle
       const finalMargin = sale.total_amount > 0 ? (totalProfit / sale.total_amount) * 100 : 0
       db.prepare("UPDATE sales SET total_cost = ?, gross_profit = ?, profit_margin = ? WHERE id = ?").run(
         totalCost,
@@ -582,7 +862,6 @@ export const salesQueries = {
         saleId,
       )
 
-      // Müşteri istatistiklerini güncelle
       if (sale.customer_id) {
         db.prepare(
           "UPDATE customers SET total_purchases = total_purchases + ?, total_profit_generated = total_profit_generated + ? WHERE id = ?",
@@ -763,11 +1042,9 @@ export const backupQueries = {
         return { success: false, message: "Yedek dosyası bulunamadı" }
       }
 
-      // Mevcut veritabanını yedekle
       const currentBackup = DB_PATH + ".backup." + Date.now()
       fs.copyFileSync(DB_PATH, currentBackup)
 
-      // Yedekten geri yükle
       fs.copyFileSync(backupPath, DB_PATH)
 
       return { success: true, message: "Geri yükleme başarılı" }
