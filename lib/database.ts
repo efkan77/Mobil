@@ -29,6 +29,7 @@ export function initializeDatabase() {
       customer_type TEXT DEFAULT 'regular', -- regular, vip, wholesale
       credit_limit REAL DEFAULT 0,
       total_purchases REAL DEFAULT 0,
+      total_profit_generated REAL DEFAULT 0,
       last_purchase_date DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -42,6 +43,8 @@ export function initializeDatabase() {
       name TEXT NOT NULL UNIQUE,
       description TEXT,
       parent_id INTEGER,
+      total_profit REAL DEFAULT 0,
+      total_sales REAL DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (parent_id) REFERENCES categories (id)
     )
@@ -61,9 +64,39 @@ export function initializeDatabase() {
       description TEXT,
       total_sold INTEGER DEFAULT 0,
       total_revenue REAL DEFAULT 0,
+      total_profit REAL DEFAULT 0,
+      profit_margin REAL DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (category_id) REFERENCES categories (id)
+    )
+  `)
+
+  // Gider kategorileri tablosu
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS expense_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT,
+      is_fixed BOOLEAN DEFAULT 0, -- Sabit gider mi?
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `)
+
+  // Giderler tablosu
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS expenses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category_id INTEGER NOT NULL,
+      description TEXT NOT NULL,
+      amount REAL NOT NULL,
+      expense_date DATE NOT NULL,
+      is_recurring BOOLEAN DEFAULT 0,
+      recurring_period TEXT, -- monthly, yearly
+      receipt_number TEXT,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (category_id) REFERENCES expense_categories (id)
     )
   `)
 
@@ -74,7 +107,8 @@ export function initializeDatabase() {
       customer_id INTEGER,
       total_amount REAL NOT NULL,
       total_cost REAL DEFAULT 0,
-      profit REAL DEFAULT 0,
+      gross_profit REAL DEFAULT 0,
+      profit_margin REAL DEFAULT 0,
       payment_type TEXT NOT NULL,
       notes TEXT,
       invoice_template TEXT DEFAULT 'default',
@@ -94,7 +128,8 @@ export function initializeDatabase() {
       unit_cost REAL DEFAULT 0,
       total_price REAL NOT NULL,
       total_cost REAL DEFAULT 0,
-      profit REAL DEFAULT 0,
+      gross_profit REAL DEFAULT 0,
+      profit_margin REAL DEFAULT 0,
       FOREIGN KEY (sale_id) REFERENCES sales (id),
       FOREIGN KEY (product_id) REFERENCES products (id)
     )
@@ -195,6 +230,29 @@ export function initializeDatabase() {
     categories.forEach((cat) => stmt.run(cat))
   }
 
+  // Varsayılan gider kategorilerini ekle
+  const expenseCategoryCount = db.prepare("SELECT COUNT(*) as count FROM expense_categories").get() as any
+  if (expenseCategoryCount.count === 0) {
+    const expenseCategories = [
+      { name: "Kira", description: "Mağaza kirası", is_fixed: 1 },
+      { name: "Personel Maaşları", description: "Çalışan maaşları", is_fixed: 1 },
+      { name: "Elektrik", description: "Elektrik faturası", is_fixed: 0 },
+      { name: "Su", description: "Su faturası", is_fixed: 0 },
+      { name: "İnternet", description: "İnternet faturası", is_fixed: 1 },
+      { name: "Telefon", description: "Telefon faturası", is_fixed: 1 },
+      { name: "Ürün Alımı", description: "Stok alımları", is_fixed: 0 },
+      { name: "Pazarlama", description: "Reklam ve pazarlama", is_fixed: 0 },
+      { name: "Nakliye", description: "Kargo ve nakliye", is_fixed: 0 },
+      { name: "Vergi", description: "Vergiler", is_fixed: 0 },
+      { name: "Sigorta", description: "Sigorta ödemeleri", is_fixed: 1 },
+      { name: "Bakım-Onarım", description: "Bakım ve onarım", is_fixed: 0 },
+      { name: "Diğer", description: "Diğer giderler", is_fixed: 0 },
+    ]
+
+    const stmt = db.prepare("INSERT INTO expense_categories (name, description, is_fixed) VALUES (?, ?, ?)")
+    expenseCategories.forEach((cat) => stmt.run(cat.name, cat.description, cat.is_fixed))
+  }
+
   // Varsayılan fatura şablonu ekle
   const templateCount = db.prepare("SELECT COUNT(*) as count FROM invoice_templates").get() as any
   if (templateCount.count === 0) {
@@ -221,7 +279,335 @@ export function initializeDatabase() {
   console.log("✅ Veritabanı başarıyla oluşturuldu: efegida.db")
 }
 
-// Kategori işlemleri
+// Gider işlemleri
+export const expenseQueries = {
+  getAll: () => {
+    return db
+      .prepare(`
+      SELECT e.*, ec.name as category_name, ec.is_fixed
+      FROM expenses e
+      JOIN expense_categories ec ON e.category_id = ec.id
+      ORDER BY e.expense_date DESC
+    `)
+      .all()
+  },
+
+  getByDateRange: (startDate: string, endDate: string) => {
+    return db
+      .prepare(`
+      SELECT e.*, ec.name as category_name, ec.is_fixed
+      FROM expenses e
+      JOIN expense_categories ec ON e.category_id = ec.id
+      WHERE DATE(e.expense_date) BETWEEN ? AND ?
+      ORDER BY e.expense_date DESC
+    `)
+      .all(startDate, endDate)
+  },
+
+  getTotalByCategory: (startDate: string, endDate: string) => {
+    return db
+      .prepare(`
+      SELECT 
+        ec.name as category_name,
+        ec.is_fixed,
+        SUM(e.amount) as total_amount,
+        COUNT(e.id) as expense_count
+      FROM expenses e
+      JOIN expense_categories ec ON e.category_id = ec.id
+      WHERE DATE(e.expense_date) BETWEEN ? AND ?
+      GROUP BY ec.id, ec.name, ec.is_fixed
+      ORDER BY total_amount DESC
+    `)
+      .all(startDate, endDate)
+  },
+
+  create: (expense: any) => {
+    const stmt = db.prepare(`
+      INSERT INTO expenses (category_id, description, amount, expense_date, is_recurring, recurring_period, receipt_number, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    return stmt.run(
+      expense.category_id,
+      expense.description,
+      expense.amount,
+      expense.expense_date,
+      expense.is_recurring,
+      expense.recurring_period,
+      expense.receipt_number,
+      expense.notes,
+    )
+  },
+}
+
+// Gider kategorileri işlemleri
+export const expenseCategoryQueries = {
+  getAll: () => db.prepare("SELECT * FROM expense_categories ORDER BY name").all(),
+  create: (name: string, description: string, isFixed: boolean) => {
+    const stmt = db.prepare("INSERT INTO expense_categories (name, description, is_fixed) VALUES (?, ?, ?)")
+    return stmt.run(name, description, isFixed)
+  },
+}
+
+// Kar-zarar analiz işlemleri
+export const profitLossQueries = {
+  // Günlük kar-zarar
+  getDailyProfitLoss: (startDate: string, endDate: string) => {
+    return db
+      .prepare(`
+      SELECT 
+        DATE(created_at) as date,
+        SUM(total_amount) as revenue,
+        SUM(total_cost) as cost_of_goods,
+        SUM(gross_profit) as gross_profit,
+        COUNT(*) as sales_count,
+        AVG(profit_margin) as avg_margin
+      FROM sales 
+      WHERE DATE(created_at) BETWEEN ? AND ?
+      GROUP BY DATE(created_at)
+      ORDER BY date DESC
+    `)
+      .all(startDate, endDate)
+  },
+
+  // Aylık kar-zarar
+  getMonthlyProfitLoss: (year: number) => {
+    return db
+      .prepare(`
+      SELECT 
+        strftime('%Y-%m', created_at) as month,
+        SUM(total_amount) as revenue,
+        SUM(total_cost) as cost_of_goods,
+        SUM(gross_profit) as gross_profit,
+        COUNT(*) as sales_count,
+        AVG(profit_margin) as avg_margin
+      FROM sales 
+      WHERE strftime('%Y', created_at) = ?
+      GROUP BY strftime('%Y-%m', created_at)
+      ORDER BY month DESC
+    `)
+      .all(year.toString())
+  },
+
+  // Ürün bazında kar analizi
+  getProductProfitAnalysis: (startDate: string, endDate: string) => {
+    return db
+      .prepare(`
+      SELECT 
+        p.name as product_name,
+        p.category_id,
+        c.name as category_name,
+        SUM(si.quantity) as total_sold,
+        SUM(si.total_price) as total_revenue,
+        SUM(si.total_cost) as total_cost,
+        SUM(si.gross_profit) as total_profit,
+        AVG(si.profit_margin) as avg_margin,
+        (SUM(si.gross_profit) / SUM(si.total_price) * 100) as profit_percentage
+      FROM sale_items si
+      JOIN products p ON si.product_id = p.id
+      LEFT JOIN categories c ON p.category_id = c.id
+      JOIN sales s ON si.sale_id = s.id
+      WHERE DATE(s.created_at) BETWEEN ? AND ?
+      GROUP BY p.id, p.name
+      ORDER BY total_profit DESC
+    `)
+      .all(startDate, endDate)
+  },
+
+  // Kategori bazında kar analizi
+  getCategoryProfitAnalysis: (startDate: string, endDate: string) => {
+    return db
+      .prepare(`
+      SELECT 
+        c.name as category_name,
+        COUNT(DISTINCT p.id) as product_count,
+        SUM(si.quantity) as total_sold,
+        SUM(si.total_price) as total_revenue,
+        SUM(si.total_cost) as total_cost,
+        SUM(si.gross_profit) as total_profit,
+        AVG(si.profit_margin) as avg_margin
+      FROM sale_items si
+      JOIN products p ON si.product_id = p.id
+      LEFT JOIN categories c ON p.category_id = c.id
+      JOIN sales s ON si.sale_id = s.id
+      WHERE DATE(s.created_at) BETWEEN ? AND ?
+      GROUP BY c.id, c.name
+      ORDER BY total_profit DESC
+    `)
+      .all(startDate, endDate)
+  },
+
+  // Müşteri bazında kar analizi
+  getCustomerProfitAnalysis: (startDate: string, endDate: string) => {
+    return db
+      .prepare(`
+      SELECT 
+        c.name as customer_name,
+        c.customer_type,
+        COUNT(s.id) as order_count,
+        SUM(s.total_amount) as total_revenue,
+        SUM(s.total_cost) as total_cost,
+        SUM(s.gross_profit) as total_profit,
+        AVG(s.profit_margin) as avg_margin,
+        MAX(s.created_at) as last_order_date
+      FROM sales s
+      LEFT JOIN customers c ON s.customer_id = c.id
+      WHERE DATE(s.created_at) BETWEEN ? AND ?
+      GROUP BY s.customer_id
+      ORDER BY total_profit DESC
+    `)
+      .all(startDate, endDate)
+  },
+
+  // Genel finansal özet
+  getFinancialSummary: (startDate: string, endDate: string) => {
+    const salesSummary = db
+      .prepare(`
+      SELECT 
+        SUM(total_amount) as total_revenue,
+        SUM(total_cost) as total_cogs,
+        SUM(gross_profit) as total_gross_profit,
+        COUNT(*) as total_sales,
+        AVG(total_amount) as avg_order_value,
+        AVG(profit_margin) as avg_profit_margin
+      FROM sales 
+      WHERE DATE(created_at) BETWEEN ? AND ?
+    `)
+      .get(startDate, endDate)
+
+    const expenseSummary = db
+      .prepare(`
+      SELECT 
+        SUM(amount) as total_expenses,
+        SUM(CASE WHEN ec.is_fixed = 1 THEN amount ELSE 0 END) as fixed_expenses,
+        SUM(CASE WHEN ec.is_fixed = 0 THEN amount ELSE 0 END) as variable_expenses
+      FROM expenses e
+      JOIN expense_categories ec ON e.category_id = ec.id
+      WHERE DATE(expense_date) BETWEEN ? AND ?
+    `)
+      .get(startDate, endDate)
+
+    return { sales: salesSummary, expenses: expenseSummary }
+  },
+
+  // Trend analizi
+  getTrendAnalysis: (days = 30) => {
+    const endDate = new Date().toISOString().split("T")[0]
+    const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
+
+    return db
+      .prepare(`
+      SELECT 
+        DATE(created_at) as date,
+        SUM(total_amount) as revenue,
+        SUM(gross_profit) as profit,
+        COUNT(*) as sales_count
+      FROM sales 
+      WHERE DATE(created_at) BETWEEN ? AND ?
+      GROUP BY DATE(created_at)
+      ORDER BY date ASC
+    `)
+      .all(startDate, endDate)
+  },
+}
+
+// Satış işlemleri (kar-zarar hesaplı)
+export const salesQueries = {
+  create: (sale: any, items: any[]) => {
+    const transaction = db.transaction(() => {
+      let totalCost = 0
+      let totalProfit = 0
+
+      // Satışı ekle
+      const saleResult = db
+        .prepare(`
+        INSERT INTO sales (customer_id, total_amount, total_cost, gross_profit, profit_margin, payment_type, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `)
+        .run(
+          sale.customer_id,
+          sale.total_amount,
+          sale.total_cost || 0,
+          sale.gross_profit || 0,
+          sale.profit_margin || 0,
+          sale.payment_type,
+          sale.notes,
+        )
+
+      const saleId = saleResult.lastInsertRowid
+
+      // Satış detaylarını ekle
+      const itemStmt = db.prepare(`
+        INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, unit_cost, total_price, total_cost, gross_profit, profit_margin)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+
+      const stockStmt = db.prepare("UPDATE products SET stock = stock - ? WHERE id = ?")
+      const statsStmt = db.prepare(
+        "UPDATE products SET total_sold = total_sold + ?, total_revenue = total_revenue + ?, total_profit = total_profit + ?, profit_margin = ? WHERE id = ?",
+      )
+
+      items.forEach((item) => {
+        const itemCost = item.unit_cost * item.quantity
+        const itemProfit = item.total_price - itemCost
+        const itemMargin = item.total_price > 0 ? (itemProfit / item.total_price) * 100 : 0
+
+        totalCost += itemCost
+        totalProfit += itemProfit
+
+        itemStmt.run(
+          saleId,
+          item.product_id,
+          item.quantity,
+          item.unit_price,
+          item.unit_cost,
+          item.total_price,
+          itemCost,
+          itemProfit,
+          itemMargin,
+        )
+
+        stockStmt.run(item.quantity, item.product_id)
+
+        // Ürün kar marjını güncelle
+        const productMargin = item.unit_price > 0 ? ((item.unit_price - item.unit_cost) / item.unit_price) * 100 : 0
+        statsStmt.run(item.quantity, item.total_price, itemProfit, productMargin, item.product_id)
+      })
+
+      // Satış kar-zarar güncelle
+      const finalMargin = sale.total_amount > 0 ? (totalProfit / sale.total_amount) * 100 : 0
+      db.prepare("UPDATE sales SET total_cost = ?, gross_profit = ?, profit_margin = ? WHERE id = ?").run(
+        totalCost,
+        totalProfit,
+        finalMargin,
+        saleId,
+      )
+
+      // Müşteri istatistiklerini güncelle
+      if (sale.customer_id) {
+        db.prepare(
+          "UPDATE customers SET total_purchases = total_purchases + ?, total_profit_generated = total_profit_generated + ? WHERE id = ?",
+        ).run(sale.total_amount, totalProfit, sale.customer_id)
+      }
+
+      return saleId
+    })
+
+    return transaction()
+  },
+
+  getAll: () => {
+    return db
+      .prepare(`
+      SELECT s.*, c.name as customer_name 
+      FROM sales s 
+      LEFT JOIN customers c ON s.customer_id = c.id 
+      ORDER BY s.created_at DESC
+    `)
+      .all()
+  },
+}
+
+// Diğer mevcut query'ler...
 export const categoryQueries = {
   getAll: () => db.prepare("SELECT * FROM categories ORDER BY name").all(),
   create: (name: string, description?: string, parentId?: number) => {
@@ -231,7 +617,6 @@ export const categoryQueries = {
   delete: (id: number) => db.prepare("DELETE FROM categories WHERE id = ?").run(id),
 }
 
-// Ürün işlemleri (genişletilmiş)
 export const productQueries = {
   getAll: () => {
     return db
@@ -272,17 +657,8 @@ export const productQueries = {
     `)
       .all(productId)
   },
-  updateSalesStats: (productId: number, quantity: number, revenue: number) => {
-    const stmt = db.prepare(`
-      UPDATE products 
-      SET total_sold = total_sold + ?, total_revenue = total_revenue + ?
-      WHERE id = ?
-    `)
-    return stmt.run(quantity, revenue, productId)
-  },
 }
 
-// Müşteri işlemleri (genişletilmiş)
 export const customerQueries = {
   getAll: () => db.prepare("SELECT * FROM customers ORDER BY total_purchases DESC").all(),
   getTopCustomers: (limit = 10) => {
@@ -311,17 +687,8 @@ export const customerQueries = {
     `)
       .all(customerId)
   },
-  updatePurchaseStats: (customerId: number, amount: number) => {
-    const stmt = db.prepare(`
-      UPDATE customers 
-      SET total_purchases = total_purchases + ?, last_purchase_date = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `)
-    return stmt.run(amount, customerId)
-  },
 }
 
-// Kredi kartı işlemleri
 export const creditCardQueries = {
   getAll: () => db.prepare("SELECT * FROM credit_cards ORDER BY bank_name, card_name").all(),
   getById: (id: number) => db.prepare("SELECT * FROM credit_cards WHERE id = ?").get(id),
@@ -341,35 +708,8 @@ export const creditCardQueries = {
       card.notes,
     )
   },
-  updateDebt: (cardId: number, amount: number) => {
-    const stmt = db.prepare(`
-      UPDATE credit_cards 
-      SET current_debt = current_debt + ?, available_limit = credit_limit - (current_debt + ?)
-      WHERE id = ?
-    `)
-    return stmt.run(amount, amount, cardId)
-  },
-  addTransaction: (cardId: number, saleId: number | null, type: string, amount: number, description: string) => {
-    const stmt = db.prepare(`
-      INSERT INTO card_transactions (card_id, sale_id, transaction_type, amount, description)
-      VALUES (?, ?, ?, ?, ?)
-    `)
-    return stmt.run(cardId, saleId, type, amount, description)
-  },
-  getTransactions: (cardId: number) => {
-    return db
-      .prepare(`
-      SELECT ct.*, s.id as sale_number
-      FROM card_transactions ct
-      LEFT JOIN sales s ON ct.sale_id = s.id
-      WHERE ct.card_id = ?
-      ORDER BY ct.transaction_date DESC
-    `)
-      .all(cardId)
-  },
 }
 
-// Fatura şablonu işlemleri
 export const templateQueries = {
   getAll: () => db.prepare("SELECT * FROM invoice_templates ORDER BY name").all(),
   getDefault: () => db.prepare("SELECT * FROM invoice_templates WHERE is_default = 1").get(),
@@ -394,94 +734,46 @@ export const templateQueries = {
       JSON.stringify(template.template_data),
     )
   },
-  setDefault: (id: number) => {
-    const transaction = db.transaction(() => {
-      db.prepare("UPDATE invoice_templates SET is_default = 0").run()
-      db.prepare("UPDATE invoice_templates SET is_default = 1 WHERE id = ?").run(id)
-    })
-    return transaction()
+}
+
+export const staffQueries = {
+  getAll: () => db.prepare("SELECT * FROM staff ORDER BY name").all(),
+  getByUsername: (username: string) => db.prepare("SELECT * FROM staff WHERE username = ?").get(username),
+  create: (staff: any) => {
+    const stmt = db.prepare(`
+      INSERT INTO staff (name, username, password, role, permissions)
+      VALUES (?, ?, ?, ?, ?)
+    `)
+    return stmt.run(staff.name, staff.username, staff.password, staff.role, JSON.stringify(staff.permissions))
   },
 }
 
-// Satış işlemleri (kar-zarar hesaplı)
-export const salesQueries = {
-  create: (sale: any, items: any[]) => {
-    const transaction = db.transaction(() => {
-      let totalCost = 0
-      let totalProfit = 0
-
-      // Satışı ekle
-      const saleResult = db
-        .prepare(`
-        INSERT INTO sales (customer_id, total_amount, total_cost, profit, payment_type, notes)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `)
-        .run(sale.customer_id, sale.total_amount, sale.total_cost || 0, sale.profit || 0, sale.payment_type, sale.notes)
-
-      const saleId = saleResult.lastInsertRowid
-
-      // Satış detaylarını ekle
-      const itemStmt = db.prepare(`
-        INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, unit_cost, total_price, total_cost, profit)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-
-      const stockStmt = db.prepare("UPDATE products SET stock = stock - ? WHERE id = ?")
-      const statsStmt = db.prepare(
-        "UPDATE products SET total_sold = total_sold + ?, total_revenue = total_revenue + ? WHERE id = ?",
-      )
-
-      items.forEach((item) => {
-        const itemCost = item.unit_cost * item.quantity
-        const itemProfit = item.total_price - itemCost
-
-        totalCost += itemCost
-        totalProfit += itemProfit
-
-        itemStmt.run(
-          saleId,
-          item.product_id,
-          item.quantity,
-          item.unit_price,
-          item.unit_cost,
-          item.total_price,
-          itemCost,
-          itemProfit,
-        )
-
-        stockStmt.run(item.quantity, item.product_id)
-        statsStmt.run(item.quantity, item.total_price, item.product_id)
-      })
-
-      // Satış kar-zarar güncelle
-      db.prepare("UPDATE sales SET total_cost = ?, profit = ? WHERE id = ?").run(totalCost, totalProfit, saleId)
-
-      // Müşteri istatistiklerini güncelle
-      if (sale.customer_id) {
-        customerQueries.updatePurchaseStats(sale.customer_id, sale.total_amount)
+export const backupQueries = {
+  createBackup: (backupPath: string) => {
+    try {
+      fs.copyFileSync(DB_PATH, backupPath)
+      return { success: true, message: "Yedekleme başarılı" }
+    } catch (error) {
+      return { success: false, message: "Yedekleme hatası: " + error }
+    }
+  },
+  restoreBackup: (backupPath: string) => {
+    try {
+      if (!fs.existsSync(backupPath)) {
+        return { success: false, message: "Yedek dosyası bulunamadı" }
       }
 
-      return saleId
-    })
+      // Mevcut veritabanını yedekle
+      const currentBackup = DB_PATH + ".backup." + Date.now()
+      fs.copyFileSync(DB_PATH, currentBackup)
 
-    return transaction()
-  },
+      // Yedekten geri yükle
+      fs.copyFileSync(backupPath, DB_PATH)
 
-  getProfitLoss: (startDate: string, endDate: string) => {
-    return db
-      .prepare(`
-      SELECT 
-        DATE(created_at) as date,
-        SUM(total_amount) as revenue,
-        SUM(total_cost) as cost,
-        SUM(profit) as profit,
-        COUNT(*) as sales_count
-      FROM sales 
-      WHERE DATE(created_at) BETWEEN ? AND ?
-      GROUP BY DATE(created_at)
-      ORDER BY date DESC
-    `)
-      .all(startDate, endDate)
+      return { success: true, message: "Geri yükleme başarılı" }
+    } catch (error) {
+      return { success: false, message: "Geri yükleme hatası: " + error }
+    }
   },
 }
 
