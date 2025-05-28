@@ -7,8 +7,8 @@ import { AuthProvider } from "./simple-auth"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Satış Yönetim Sistemi",
-  description: "Kapsamlı satış ve fatura yönetim sistemi",
+  title: "EFE GIDA TOPTAN - Satış Yönetim Sistemi",
+  description: "EFE GIDA TOPTAN için kapsamlı satış ve fatura yönetim sistemi",
     generator: 'v0.dev'
 }
 

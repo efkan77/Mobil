@@ -52,8 +52,11 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">Satış Yönetim Sistemi</CardTitle>
-          <CardDescription>Hesabınıza giriş yapın</CardDescription>
+          <div className="flex justify-center mb-4">
+            <img src="/logo.webp" alt="EFE GIDA TOPTAN" className="h-16 w-16 object-contain" />
+          </div>
+          <CardTitle className="text-2xl font-bold">EFE GIDA TOPTAN</CardTitle>
+          <CardDescription>Satış Yönetim Sistemi - Hesabınıza giriş yapın</CardDescription>
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="admin" className="w-full">

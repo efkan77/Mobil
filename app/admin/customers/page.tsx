@@ -15,7 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Plus, Search, Edit, Trash2, Users, ArrowLeft, Phone, Mail } from "lucide-react"
+import { Plus, Search, Edit, Trash2, Users, ArrowLeft, Phone, Mail, Key } from "lucide-react"
 import Link from "next/link"
 
 interface Customer {
@@ -24,6 +24,8 @@ interface Customer {
   phone: string
   email: string
   address: string
+  username: string
+  password: string
   totalPurchases: number
   lastPurchase: string
   status: "active" | "inactive"
@@ -37,6 +39,8 @@ export default function CustomersPage() {
       phone: "0532 123 45 67",
       email: "ahmet@email.com",
       address: "Kadıköy, İstanbul",
+      username: "customer1",
+      password: "pass123",
       totalPurchases: 125000,
       lastPurchase: "2024-01-15",
       status: "active",
@@ -47,6 +51,8 @@ export default function CustomersPage() {
       phone: "0533 987 65 43",
       email: "fatma@email.com",
       address: "Beşiktaş, İstanbul",
+      username: "customer2",
+      password: "pass456",
       totalPurchases: 89000,
       lastPurchase: "2024-01-12",
       status: "active",
@@ -60,32 +66,68 @@ export default function CustomersPage() {
     phone: "",
     email: "",
     address: "",
+    username: "",
+    password: "",
   })
 
   const filteredCustomers = customers.filter(
     (customer) => customer.name.toLowerCase().includes(searchTerm.toLowerCase()) || customer.phone.includes(searchTerm),
   )
 
+  const generateUsername = (name: string) => {
+    const cleanName = name
+      .toLowerCase()
+      .replace(/[^a-z]/g, "")
+      .substring(0, 8)
+    const randomNum = Math.floor(Math.random() * 999) + 1
+    return `${cleanName}${randomNum}`
+  }
+
+  const generatePassword = () => {
+    const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
+    let password = ""
+    for (let i = 0; i < 8; i++) {
+      password += chars.charAt(Math.floor(Math.random() * chars.length))
+    }
+    return password
+  }
+
   const addCustomer = () => {
-    if (!newCustomer.name || !newCustomer.phone) return
+    if (!newCustomer.name || !newCustomer.phone) {
+      alert("Lütfen en az ad ve telefon bilgilerini girin")
+      return
+    }
+
+    const username = newCustomer.username || generateUsername(newCustomer.name)
+    const password = newCustomer.password || generatePassword()
 
     const customer: Customer = {
       id: Date.now().toString(),
       ...newCustomer,
+      username,
+      password,
       totalPurchases: 0,
       lastPurchase: "-",
       status: "active",
     }
 
     setCustomers([...customers, customer])
-    setNewCustomer({ name: "", phone: "", email: "", address: "" })
+    setNewCustomer({ name: "", phone: "", email: "", address: "", username: "", password: "" })
     setIsAddDialogOpen(false)
+
+    alert(`Müşteri başarıyla eklendi!\n\nGiriş Bilgileri:\nKullanıcı Adı: ${username}\nŞifre: ${password}`)
   }
 
   const deleteCustomer = (id: string) => {
     if (confirm("Bu müşteriyi silmek istediğinizden emin misiniz?")) {
       setCustomers(customers.filter((c) => c.id !== id))
     }
+  }
+
+  const resetPassword = (customer: Customer) => {
+    const newPassword = generatePassword()
+    setCustomers(customers.map((c) => (c.id === customer.id ? { ...c, password: newPassword } : c)))
+    alert(`${customer.name} için yeni şifre: ${newPassword}`)
   }
 
   return (
@@ -102,7 +144,7 @@ export default function CustomersPage() {
               </Link>
               <div>
                 <h1 className="text-3xl font-bold text-gray-900">Müşteri Yönetimi</h1>
-                <p className="text-gray-600">Müşteri bilgileri ve satış geçmişi</p>
+                <p className="text-gray-600">EFE GIDA TOPTAN - Müşteri bilgileri ve panel erişimi</p>
               </div>
             </div>
             <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
@@ -112,51 +154,84 @@ export default function CustomersPage() {
                   Yeni Müşteri
                 </Button>
               </DialogTrigger>
-              <DialogContent>
+              <DialogContent className="max-w-2xl">
                 <DialogHeader>
                   <DialogTitle>Yeni Müşteri Ekle</DialogTitle>
-                  <DialogDescription>Müşteri bilgilerini girin</DialogDescription>
+                  <DialogDescription>
+                    Müşteri bilgilerini girin. Panel erişimi için kullanıcı adı ve şifre otomatik oluşturulacak.
+                  </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4">
-                  <div>
-                    <Label htmlFor="name">Ad Soyad</Label>
-                    <Input
-                      id="name"
-                      value={newCustomer.name}
-                      onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
-                      placeholder="Müşteri adını girin"
-                    />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="name">Ad Soyad *</Label>
+                      <Input
+                        id="name"
+                        value={newCustomer.name}
+                        onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
+                        placeholder="Müşteri adını girin"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="phone">Telefon *</Label>
+                      <Input
+                        id="phone"
+                        value={newCustomer.phone}
+                        onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
+                        placeholder="Telefon numarası"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <Label htmlFor="phone">Telefon</Label>
-                    <Input
-                      id="phone"
-                      value={newCustomer.phone}
-                      onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
-                      placeholder="Telefon numarası"
-                    />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="email">E-posta</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        value={newCustomer.email}
+                        onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })}
+                        placeholder="E-posta adresi"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="address">Adres</Label>
+                      <Input
+                        id="address"
+                        value={newCustomer.address}
+                        onChange={(e) => setNewCustomer({ ...newCustomer, address: e.target.value })}
+                        placeholder="Adres"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <Label htmlFor="email">E-posta</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      value={newCustomer.email}
-                      onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })}
-                      placeholder="E-posta adresi"
-                    />
+
+                  <div className="border-t pt-4">
+                    <h4 className="font-medium mb-3">Panel Erişim Bilgileri (İsteğe Bağlı)</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="username">Kullanıcı Adı</Label>
+                        <Input
+                          id="username"
+                          value={newCustomer.username}
+                          onChange={(e) => setNewCustomer({ ...newCustomer, username: e.target.value })}
+                          placeholder="Otomatik oluşturulacak"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Boş bırakılırsa otomatik oluşturulur</p>
+                      </div>
+                      <div>
+                        <Label htmlFor="password">Şifre</Label>
+                        <Input
+                          id="password"
+                          value={newCustomer.password}
+                          onChange={(e) => setNewCustomer({ ...newCustomer, password: e.target.value })}
+                          placeholder="Otomatik oluşturulacak"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Boş bırakılırsa otomatik oluşturulur</p>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <Label htmlFor="address">Adres</Label>
-                    <Input
-                      id="address"
-                      value={newCustomer.address}
-                      onChange={(e) => setNewCustomer({ ...newCustomer, address: e.target.value })}
-                      placeholder="Adres"
-                    />
-                  </div>
+
                   <Button onClick={addCustomer} className="w-full">
-                    Müşteri Ekle
+                    Müşteri Ekle ve Giriş Bilgileri Oluştur
                   </Button>
                 </div>
               </DialogContent>
@@ -206,15 +281,10 @@ export default function CustomersPage() {
           <Card>
             <CardContent className="p-6">
               <div className="flex items-center">
-                <Users className="h-8 w-8 text-orange-600" />
+                <Key className="h-8 w-8 text-orange-600" />
                 <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Ortalama Satış</p>
-                  <p className="text-2xl font-bold">
-                    ₺
-                    {Math.round(
-                      customers.reduce((sum, c) => sum + c.totalPurchases, 0) / customers.length || 0,
-                    ).toLocaleString()}
-                  </p>
+                  <p className="text-sm font-medium text-gray-600">Panel Erişimi</p>
+                  <p className="text-2xl font-bold">{customers.length}</p>
                 </div>
               </div>
             </CardContent>
@@ -240,7 +310,7 @@ export default function CustomersPage() {
         <Card>
           <CardHeader>
             <CardTitle>Müşteri Listesi</CardTitle>
-            <CardDescription>Tüm müşterilerinizi buradan yönetebilirsiniz</CardDescription>
+            <CardDescription>Tüm müşterilerinizi ve panel erişim bilgilerini buradan yönetebilirsiniz</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
@@ -248,6 +318,7 @@ export default function CustomersPage() {
                 <TableRow>
                   <TableHead>Müşteri Adı</TableHead>
                   <TableHead>İletişim</TableHead>
+                  <TableHead>Panel Erişimi</TableHead>
                   <TableHead>Toplam Alışveriş</TableHead>
                   <TableHead>Son Alışveriş</TableHead>
                   <TableHead>Durum</TableHead>
@@ -275,6 +346,12 @@ export default function CustomersPage() {
                         </div>
                       </div>
                     </TableCell>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">Kullanıcı: {customer.username}</p>
+                        <p className="text-sm text-gray-600">Şifre: {customer.password}</p>
+                      </div>
+                    </TableCell>
                     <TableCell>₺{customer.totalPurchases.toLocaleString()}</TableCell>
                     <TableCell>{customer.lastPurchase}</TableCell>
                     <TableCell>
@@ -286,6 +363,9 @@ export default function CustomersPage() {
                       <div className="flex space-x-2">
                         <Button size="sm" variant="outline">
                           <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => resetPassword(customer)}>
+                          <Key className="h-4 w-4" />
                         </Button>
                         <Button size="sm" variant="destructive" onClick={() => deleteCustomer(customer.id)}>
                           <Trash2 className="h-4 w-4" />
